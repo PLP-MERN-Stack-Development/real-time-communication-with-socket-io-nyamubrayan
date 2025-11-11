@@ -15,36 +15,66 @@ const io = new Server(server, {
   },
 });
 
-let onlineUsers = {};
+let onlineUsers = {}; // { socketId: { username, room } }
 
 io.on("connection", (socket) => {
   console.log("🟢 A user connected", socket.id);
 
-  // Save username when user joins
-  socket.on("join", (username) => {
-    onlineUsers[socket.id] = username;
-    io.emit("onlineUsers", Object.values(onlineUsers));
-    io.emit("notification", `${username} has joined the chat`);
+  // Join room
+  socket.on("joinRoom", ({ username, room }) => {
+    socket.join(room);
+    onlineUsers[socket.id] = { username, room };
+
+    const usersInRoom = Object.values(onlineUsers)
+      .filter(u => u.room === room)
+      .map(u => u.username);
+
+    io.to(room).emit("onlineUsers", usersInRoom);
+    io.to(room).emit("notification", `${username} joined ${room}`);
+  });
+
+  // Send message
+  socket.on("sendMessage", ({ room, message }) => {
+    console.log("📩", message);
+    const user = onlineUsers[socket.id];
+    
+    // Create message object with username
+    const msgData = {
+      user: user?.username || "Anonymous",
+      text: message.text,
+      time: message.time
+    };
+    
+    // Emit to all connected clients (global)
+    io.emit("receiveMessage", msgData);
   });
 
   // Typing indicator
-  socket.on("typing", (isTyping) => {
-    socket.broadcast.emit("userTyping", { user: onlineUsers[socket.id], isTyping });
+  socket.on("typing", ({ room, isTyping }) => {
+    if (!onlineUsers[socket.id]) return;
+    socket.to(room).emit("userTyping", { user: onlineUsers[socket.id].username, isTyping });
   });
 
-  // Sending messages
-  socket.on("sendMessage", (message) => {
-    console.log("📩", message);
-    io.emit("receiveMessage", message);
+  // Private message
+  socket.on("privateMessage", ({ toSocketId, message }) => {
+    socket.to(toSocketId).emit("receivePrivateMessage", message);
   });
 
   // Disconnect
   socket.on("disconnect", () => {
-    const username = onlineUsers[socket.id];
-    delete onlineUsers[socket.id];
-    io.emit("onlineUsers", Object.values(onlineUsers));
-    if(username) io.emit("notification", `${username} has left the chat`);
-    console.log("🔴 A user disconnected", socket.id);
+    const user = onlineUsers[socket.id];
+    if (user) {
+      const { username, room } = user;
+      delete onlineUsers[socket.id];
+
+      const usersInRoom = Object.values(onlineUsers)
+        .filter(u => u.room === room)
+        .map(u => u.username);
+
+      io.to(room).emit("onlineUsers", usersInRoom);
+      io.to(room).emit("notification", `${username} has left the chat`);
+      console.log("🔴 A user disconnected", socket.id);
+    }
   });
 });
 
