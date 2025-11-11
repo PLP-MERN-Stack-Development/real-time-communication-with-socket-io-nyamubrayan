@@ -15,19 +15,37 @@ const io = new Server(server, {
   },
 });
 
+let onlineUsers = {};
+
 io.on("connection", (socket) => {
   console.log("🟢 A user connected", socket.id);
 
-  socket.on("disconnect", () => {
-    console.log("🔴 A user disconnected", socket.id);
+  // Save username when user joins
+  socket.on("join", (username) => {
+    onlineUsers[socket.id] = username;
+    io.emit("onlineUsers", Object.values(onlineUsers));
+    io.emit("notification", `${username} has joined the chat`);
   });
 
-socket.on("sendMessage", (message) => {
-  console.log("📩", message);
-  io.emit("receiveMessage", message);
-});
+  // Typing indicator
+  socket.on("typing", (isTyping) => {
+    socket.broadcast.emit("userTyping", { user: onlineUsers[socket.id], isTyping });
+  });
 
+  // Sending messages
+  socket.on("sendMessage", (message) => {
+    console.log("📩", message);
+    io.emit("receiveMessage", message);
+  });
 
+  // Disconnect
+  socket.on("disconnect", () => {
+    const username = onlineUsers[socket.id];
+    delete onlineUsers[socket.id];
+    io.emit("onlineUsers", Object.values(onlineUsers));
+    if(username) io.emit("notification", `${username} has left the chat`);
+    console.log("🔴 A user disconnected", socket.id);
+  });
 });
 
 const PORT = process.env.PORT || 5000;
